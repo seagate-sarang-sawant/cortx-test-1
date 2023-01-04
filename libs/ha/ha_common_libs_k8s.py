@@ -29,10 +29,11 @@ import secrets
 import sys
 import time
 from ast import literal_eval
-from multiprocessing import Process
+from http import HTTPStatus
 from time import perf_counter_ns
 
 import yaml
+from requests import exceptions as req_exception
 
 from commons import commands as common_cmd
 from commons import constants as common_const
@@ -43,15 +44,19 @@ from commons.helpers.pods_helper import LogicalNode
 from commons.utils import config_utils
 from commons.utils import system_utils
 from commons.utils.system_utils import run_local_cmd
-from config import CMN_CFG, HA_CFG
+from config import CMN_CFG
+from config import CSM_REST_CFG
+from config import HA_CFG
 from config.s3 import S3_BLKBOX_CFG
 from config.s3 import S3_CFG
+from libs.csm.rest.csm_rest_core_lib import RestClient
 from libs.csm.rest.csm_rest_system_health import SystemHealth
 from libs.di.di_mgmt_ops import ManagementOPs
-from libs.di.di_run_man import RunDataCheckManager
 from libs.s3.s3_multipart_test_lib import S3MultipartTestLib
 from libs.s3.s3_restapi_test_lib import S3AccountOperationsRestAPI
 from libs.s3.s3_test_lib import S3TestLib
+from libs.s3.s3_versioning_common_test_lib import empty_versioned_bucket
+from libs.s3.s3_versioning_test_lib import S3VersioningTestLib
 from scripts.s3_bench import s3bench
 
 LOGGER = logging.getLogger(__name__)
@@ -81,6 +86,7 @@ class HAK8s:
         self.parallel_ios = None
         self.system_random = secrets.SystemRandom()
         self.dir_path = common_const.K8S_SCRIPTS_PATH
+        self.restapi = RestClient(CSM_REST_CFG)
 
     def polling_host(self,
                      max_timeout: int,
@@ -188,56 +194,10 @@ class HAK8s:
             max_timeout=self.t_power_off, host=host, exp_resp=False, bmc_obj=bmc_obj)
         return resp
 
-    def status_pods_online(self, no_pods: int):
-        """
-        Helper function to check that all Pods are shown online in cortx REST
-        :param no_pods: Number of pods in the cluster
-        :return: boolean
-        """
-        # Future: Right now system health api is not available but will be implemented after M0
-        check_rem_pod = ["online" for _ in range(no_pods)]
-        rest_resp = self.system_health.verify_node_health_status_rest(exp_status=check_rem_pod)
-        LOGGER.info("REST response for pods health status. %s", rest_resp[1])
-        return rest_resp
-
-    def status_cluster_resource_online(self):
-        """
-        Check cluster/rack/site/pods are shown online in Cortx REST
-        :return: boolean
-        """
-        LOGGER.info("Check cluster/rack/site/pods health status.")
-        resp = self.check_csrn_status(csr_sts="online", pod_sts="online", pod_id=0)
-        LOGGER.info("Health status response : %s", resp[1])
-        if resp[0]:
-            LOGGER.info("cluster/rack/site/pods health status is online in REST")
-        return resp
-
-    def check_csrn_status(self, csr_sts: str, pod_sts: str, pod_id: int):
-        """
-        Check cluster/rack/site/pod status with expected status using REST
-        :param csr_sts: cluster/rack/site's expected status
-        :param pod_sts: Pod's expected status
-        :param pod_id: Pod ID to check for expected status
-        :return: (bool, response)
-        """
-        check_rem_pod = [
-            pod_sts if num == pod_id else "online" for num in range(int(self.num_pods))]
-        LOGGER.info("Checking pod-%s status is %s via REST", pod_id+1, pod_sts)
-        resp = self.system_health.verify_node_health_status_rest(
-            check_rem_pod)
-        if not resp[0]:
-            return resp
-        LOGGER.info("Checking Cluster/Site/Rack status is %s via REST", csr_sts)
-        resp = self.system_health.check_csr_health_status_rest(csr_sts)
-        if not resp[0]:
-            return resp
-
-        return True, f"cluster/rack/site status is {csr_sts} and \
-        pod-{pod_id+1} is {pod_sts} in Cortx REST"
-
+    # pylint: disable-msg=too-many-locals
     def delete_s3_acc_buckets_objects(self, s3_data: dict, obj_crud: bool = False):
         """
-        This function deletes all s3 buckets objects for the s3 account
+        This function deletes all s3 buckets objects(Versioned or unversioned) for the s3 account
         and all s3 accounts
         :param s3_data: Dictionary for s3 operation info
         :param obj_crud: If true, it will delete only objects of all buckets
@@ -259,91 +219,27 @@ class HAK8s:
                 return True, "Successfully performed Objects Delete operation"
             for details in s3_data.values():
                 s3_del = S3TestLib(endpoint_url=S3_CFG["s3_url"],
-                                   access_key=details['accesskey'],
-                                   secret_key=details['secretkey'])
-                response = s3_del.delete_all_buckets()
-                if not response[0]:
-                    return response
+                                   access_key=details['accesskey'], secret_key=details['secretkey'])
+                s3_ver = S3VersioningTestLib(access_key=details['accesskey'],
+                                             secret_key=details['secretkey'],
+                                             endpoint_url=S3_CFG["s3_url"])
+                buckets = s3_del.bucket_list()[1]
+                LOGGER.info("Delete all versions and delete markers present for all the buckets.")
+                for _bucket in buckets:
+                    empty_versioned_bucket(s3_ver, _bucket)
+                    obj_list = s3_del.object_list(_bucket)
+                    LOGGER.debug("List of object response for %s bucket %s", _bucket, obj_list)
+                    response = s3_del.delete_multiple_objects(_bucket, obj_list[1], quiet=True)
+                    LOGGER.debug("Delete multiple objects response %s", response[1])
+                    s3_del.delete_bucket(_bucket, force=True)
                 response = self.s3_rest_obj.delete_s3_account(details['user_name'])
                 if not response[0]:
                     return response
-            return True, "Successfully performed S3 operation clean up"
+            return True, "Successfully performed S3 clean up operations"
         except (ValueError, KeyError, CTException) as error:
             LOGGER.exception("%s %s: %s", Const.EXCEPTION_ERROR,
                              HAK8s.delete_s3_acc_buckets_objects.__name__, error)
             return False, error
-
-    # pylint: disable=too-many-arguments
-    # pylint: disable-msg=too-many-locals
-    def perform_ios_ops(
-            self,
-            prefix_data: str = None,
-            nusers: int = 2,
-            nbuckets: int = 2,
-            files_count: int = 10,
-            di_data: tuple = None,
-            is_di: bool = False):
-        """
-        This function creates s3 acc, buckets and performs IO.
-        This will perform DI check if is_di True and once done,
-        deletes all the buckets and s3 accounts created
-        :param prefix_data: Prefix data for IO Operation
-        :param nusers: Number of s3 user
-        :param nbuckets: Number of buckets per s3 user
-        :param files_count: NUmber of files to be uploaded per bucket
-        :param di_data: Data for DI check operation
-        :param is_di: To perform DI check operation
-        :return: (bool, response)
-        """
-        try:
-            if not is_di:
-                LOGGER.info("create s3 acc, buckets and upload objects.")
-                users = self.mgnt_ops.create_account_users(nusers=nusers)
-                io_data = self.mgnt_ops.create_buckets(nbuckets=nbuckets, users=users)
-                run_data_chk_obj = RunDataCheckManager(users=io_data)
-                pref_dir = {"prefix_dir": prefix_data}
-                star_res = run_data_chk_obj.start_io(users=io_data, buckets=None, prefs=pref_dir,
-                                                     files_count=files_count)
-                if not star_res:
-                    return False, star_res
-                return True, run_data_chk_obj, io_data
-            LOGGER.info("Checking DI for IOs run.")
-            stop_res = di_data[0].stop_io(users=di_data[1], di_check=is_di)
-            if not stop_res[0]:
-                return stop_res
-            del_resp = self.delete_s3_acc_buckets_objects(di_data[1])
-            if not del_resp[0]:
-                return del_resp
-            return True, "Di check for IOs passed successfully"
-        except ValueError as error:
-            LOGGER.exception("%s %s: %s", Const.EXCEPTION_ERROR,
-                             HAK8s.perform_ios_ops.__name__, error)
-            return False, error
-
-    def perform_io_read_parallel(self, di_data, is_di=True, start_read=True):
-        """
-        This function runs parallel async stop_io function until called again with
-        start_read with False
-        :param di_data: Tuple of RunDataCheckManager obj and User-bucket info from
-        WRITEs call
-        :param is_di: IF DI check is required on READ objects
-        :param start_read: If True, function will start the parallel READs
-        and if False function will Stop the parallel READs
-        :return: bool/Process object or stop process status
-        """
-        if start_read:
-            self.parallel_ios = Process(
-                target=di_data[0].stop_io, args=(di_data[1], is_di))
-            self.parallel_ios.start()
-            return_val = (True, self.parallel_ios)
-        else:
-            if self.parallel_ios.is_alive():
-                self.parallel_ios.join()
-            LOGGER.info(
-                "Parallel IOs stopped: %s",
-                not self.parallel_ios.is_alive())
-            return_val = (not self.parallel_ios.is_alive(), "Failed to stop parallel READ IOs.")
-        return return_val
 
     # pylint: disable=too-many-arguments
     def ha_s3_workload_operation(
@@ -356,7 +252,10 @@ class HAK8s:
             nsamples: int = 10,
             nclients: int = 10,
             large_workload: bool = False,
-            setup_s3bench: bool = True):
+            setup_s3bench: bool = True,
+            end_point=S3_CFG["s3_url"],
+            connect_timeout=None,
+            **kwargs):
         """
         This function creates s3 acc, buckets and performs WRITEs/READs/DELETEs
         operations on VM/HW
@@ -369,14 +268,20 @@ class HAK8s:
         :param nclients: Number of clients/workers
         :param large_workload: Flag to start large workload IOs
         :param setup_s3bench: Flag if s3bench need to be setup
+        :param end_point: Endpoint to run IOs
+        :param connect_timeout: Maximum amount of time a dial will wait for a connect to complete
         :return: bool/operation response
         """
+        host = kwargs.get("host", None)
+        user = kwargs.get("user", None)
+        pwd = kwargs.get("pwd", None)
+        remote = True if host else False
         workloads = copy.deepcopy(HA_CFG["s3_bench_workloads"])
         if self.setup_type == "HW" or large_workload:
             workloads.extend(HA_CFG["s3_bench_large_workloads"])
 
         if setup_s3bench:
-            resp = s3bench.setup_s3bench()
+            resp = s3bench.setup_s3bench(hostname=host, username=user, password=pwd, remote=remote)
             if not resp:
                 return resp, "Couldn't setup s3bench on client machine."
         for workload in workloads:
@@ -386,7 +291,8 @@ class HAK8s:
                 num_clients=nclients, num_sample=nsamples, obj_name_pref=f"ha_{log_prefix}",
                 obj_size=workload, skip_write=skipwrite, skip_read=skipread,
                 skip_cleanup=skipcleanup, log_file_prefix=log_prefix.upper(),
-                end_point=S3_CFG["s3_url"], validate_certs=S3_CFG["validate_certs"])
+                end_point=end_point, validate_certs=S3_CFG["validate_certs"], host=host,
+                user=user, pwd=pwd, remote=remote, connectTimeout=connect_timeout)
             resp = system_utils.validate_s3bench_parallel_execution(log_path=resp[1])
             if not resp[0]:
                 return False, f"s3bench operation failed: {resp[1]}"
@@ -695,12 +601,13 @@ class HAK8s:
                                                            dest_object=obj_name)
                 LOGGER.info("status is %s with Response: %s", status, response)
                 copy_etag = response['CopyObjectResult']['ETag']
-                if put_etag == copy_etag:
+                if put_etag.strip('"') == copy_etag.strip('"'):
                     LOGGER.info("Object %s copied to bucket %s with object name %s successfully",
                                 object_name, bkt_name, obj_name)
                 else:
                     LOGGER.error("Etags don't match for copy object %s to bucket %s with object "
                                  "name %s", object_name, bkt_name, obj_name)
+                    failed_bkts.append(bkt_name)
             except CTException as error:
                 LOGGER.exception("Error: %s", error)
                 if event.is_set():
@@ -862,22 +769,26 @@ class HAK8s:
         LOGGER.debug("Time taken by cluster restart is %s seconds", int(time.time()) - start_time)
         return resp
 
-    def restore_pod(self, pod_obj, restore_method, restore_params: dict = None, clstr_status=False):
+    def restore_pod(self, pod_obj, restore_method, restore_params: dict = None,
+                    clstr_status=False):
         """
         Helper function to restore pod based on way_to_restore
         :param pod_obj: Object of master node
         :param restore_method: Restore method to be used depending on shutdown method
         ("scale_replicas", "k8s", "helm")
         :param restore_params: Dict which has parameters required to restore pods
-        :clstr_status: Flag to check cluster status after pod restored
+        :param clstr_status: Flag to check cluster status after pod restored
         :return: Bool, response
         """
         resp = False
-        deployment_name = restore_params["deployment_name"]
+        deployment_name = restore_params.get("deployment_name", None)
         deployment_backup = restore_params.get("deployment_backup", None)
+        set_name = restore_params.get("set_name", None)
+        num_replica = restore_params.get("num_replica", 1)
 
         if restore_method == common_const.RESTORE_SCALE_REPLICAS:
-            resp = pod_obj.create_pod_replicas(num_replica=1, deploy=deployment_name)
+            resp = pod_obj.create_pod_replicas(num_replica=num_replica, deploy=deployment_name,
+                                               set_name=set_name)
         elif restore_method == common_const.RESTORE_DEPLOYMENT_K8S:
             resp = pod_obj.recover_deployment_k8s(deployment_name=deployment_name,
                                                   backup_path=deployment_backup)
@@ -892,8 +803,9 @@ class HAK8s:
 
     def event_s3_operation(self, event, setup_s3bench=True, log_prefix=None, s3userinfo=None,
                            skipread=False, skipwrite=False, skipcleanup=False, nsamples=10,
-                           nclients=10, output=None, event_set_clr=None,
-                           httpclientimeout=HA_CFG["s3_operation_data"]["httpclientimeout"]):
+                           nclients=10, output=None, event_set_clr=None, max_retries=None,
+                           httpclientimeout=HA_CFG["s3_operation_data"]["httpclientimeout"],
+                           connect_timeout=None, end_point=S3_CFG["s3_url"], **kwargs):
         """
         This function executes s3 bench operation on VM/HW.(can be used for parallel execution)
         :param event: Thread event to be sent in case of parallel IOs
@@ -909,16 +821,23 @@ class HAK8s:
         :param httpclientimeout: Time limit in ms for requests made by this Client.
         :param event_set_clr: Thread event set-clear flag reference when s3bench workload
         execution miss the event set-clear time window
+        :param max_retries: Number of retries for IO operations
+        :param connect_timeout: Maximum amount of time a dial will wait for a connect to complete
+        :param end_point: Endpoint to run IOs
         :return: None
         """
         pass_res = []
         fail_res = []
         results = dict()
+        host = kwargs.get("host", None)
+        user = kwargs.get("user", None)
+        pwd = kwargs.get("pwd", None)
+        remote = True if host else False
         workloads = HA_CFG["s3_bench_workloads"]
         if self.setup_type == "HW":
             workloads.extend(HA_CFG["s3_bench_large_workloads"])
         if setup_s3bench:
-            resp = s3bench.setup_s3bench()
+            resp = s3bench.setup_s3bench(hostname=host, username=user, password=pwd, remote=remote)
             if not resp:
                 status = (resp, "Couldn't setup s3bench on client machine.")
                 output.put(status)
@@ -930,8 +849,9 @@ class HAK8s:
                 num_sample=nsamples, obj_name_pref=f"ha_{log_prefix}",
                 skip_write=skipwrite, skip_read=skipread, obj_size=workload,
                 skip_cleanup=skipcleanup, log_file_prefix=f"log_{log_prefix}",
-                end_point=S3_CFG["s3_url"], validate_certs=S3_CFG["validate_certs"],
-                httpclientimeout=httpclientimeout)
+                end_point=end_point, validate_certs=S3_CFG["validate_certs"],
+                httpclientimeout=httpclientimeout, max_retries=max_retries,
+                connectTimeout=connect_timeout, host=host, user=user, pwd=pwd, remote=remote)
             if event.is_set() or (isinstance(event_set_clr, list) and event_set_clr[0]):
                 LOGGER.debug("The state of event set clear Flag is %s", event_set_clr)
                 fail_res.append(resp)
@@ -1165,8 +1085,8 @@ class HAK8s:
         return False, "Worker node and Fqdn of data node not same"
 
     @staticmethod
-    def create_bucket_chunk_upload(s3_data, bucket_name, file_size, chunk_obj_path, output,
-                                   bkt_op=True):
+    def create_bucket_chunk_upload(s3_data, bucket_name, file_size, chunk_obj_path, output=None,
+                                   bkt_op=True, background=True):
         """
         Helper function to do chunk upload
         :param s3_data: s3 account details
@@ -1175,6 +1095,7 @@ class HAK8s:
         :param chunk_obj_path: Path of the file to be uploaded
         :param output: Queue used to fill output
         :param bkt_op: Flag to create bucket and object
+        :param background: Flag to indicate if background process or not
         :return: response
         """
         jclient_prop = S3_BLKBOX_CFG["jcloud_cfg"]["jclient_properties_path"]
@@ -1187,6 +1108,8 @@ class HAK8s:
             LOGGER.info("Creating a bucket with name : %s", bucket_name)
             res = s3_test_obj.create_bucket(bucket_name)
             if not res[0] or res[1] != bucket_name:
+                if not background:
+                    return False
                 output.put(False)
                 sys.exit(1)
             LOGGER.info("Created a bucket with name : %s", bucket_name)
@@ -1195,6 +1118,8 @@ class HAK8s:
             resp = system_utils.create_file(chunk_obj_path, file_size)
             LOGGER.info("Response: %s", resp)
             if not resp[0]:
+                if not background:
+                    return False
                 output.put(False)
                 sys.exit(1)
 
@@ -1204,9 +1129,13 @@ class HAK8s:
         LOGGER.info("Running command %s", put_cmd)
         resp = system_utils.execute_cmd(put_cmd)
         if not resp:
+            if not background:
+                return False
             output.put(False)
             sys.exit(1)
 
+        if not background:
+            return True
         output.put(True)
         sys.exit(0)
 
@@ -1474,9 +1403,9 @@ class HAK8s:
         return resp
 
     def delete_kpod_with_shutdown_methods(self, master_node_obj, health_obj,
-                                          pod_prefix=None, kvalue=1,
+                                          pod_prefix=None, kvalue=1, delete_pod=None,
                                           down_method=common_const.RESTORE_SCALE_REPLICAS,
-                                          event=None, event_set_clr=None):
+                                          event=None, event_set_clr=None, num_replica=0):
         """
         Delete K pods by given shutdown method. Check and verify deleted/remaining pod's services
         status, cluster status
@@ -1485,9 +1414,11 @@ class HAK8s:
         :param pod_prefix: Pod prefix to be deleted (Expected List type)
         :param down_method: Pod shutdown/delete method.
         :param kvalue: Number of pod to be shutdown/deleted.
+        :param delete_pod: pod name to be deleted (optional)
         :param event_set_clr: Thread event set-clear flag reference when s3bench workload
         execution miss the event set-clear time window
         :param event: Thread event to set/clear before/after pods/nodes
+        :param num_replica: Number of replicas of the pod to be created
         shutdown with parallel IOs
         return : tuple
         """
@@ -1499,10 +1430,13 @@ class HAK8s:
                     "hostname": None}
         delete_pods = list()
         remaining = list()
-        for ptype in pod_prefix:
-            pod_list = master_node_obj.get_all_pods(pod_prefix=ptype)
-            # Get the list of Kvalue pods to be deleted for given pod_prefix list
-            delete_pods.extend(random.sample(pod_list, kvalue))
+        if delete_pod is not None:
+            delete_pods.extend(delete_pod)
+        else:
+            for ptype in pod_prefix:
+                pod_list = master_node_obj.get_all_pods(pod_prefix=ptype)
+                # Get the list of Kvalue pods to be deleted for given pod_prefix list
+                delete_pods.extend(random.sample(pod_list, kvalue))
 
         LOGGER.info("Get the list of all pods of total pod types.")
         for ptype in total_pod_type:
@@ -1516,7 +1450,7 @@ class HAK8s:
                 event.set()
             LOGGER.info("Deleting pod %s by %s method", pod, down_method)
             if down_method == common_const.RESTORE_SCALE_REPLICAS:
-                resp = master_node_obj.create_pod_replicas(num_replica=0, pod_name=pod)
+                resp = master_node_obj.create_pod_replicas(num_replica=num_replica, pod_name=pod)
                 if resp[0]:
                     return False, pod_info
                 pod_info[pod] = pod_data.copy()
@@ -1539,7 +1473,7 @@ class HAK8s:
             resp = health_obj.get_pod_svc_status(pod_list=[pod], fail=True,
                                                  hostname=pod_info[pod]['hostname'])
             LOGGER.debug("Response: %s", resp)
-            if not resp[0]:
+            if not resp[0] or False in resp[1]:
                 return False, pod_info
         LOGGER.info("Successfully deleted %s by %s method", delete_pods, down_method)
 
@@ -1823,7 +1757,7 @@ class HAK8s:
         return True, f"Successfully failed over pods {list(pod_yaml.keys())}"
 
     def iam_bucket_cruds(self, event, s3_obj=None, user_crud=False, num_users=None, bkt_crud=False,
-                         num_bkts=None, del_users_dict=None, output=None):
+                         num_bkts=None, del_users_dict=None, output=None, **kwargs):
         """
         Function to perform iam user and bucket crud operations in loop (To be used for background)
         :param event: event to intimate thread about main thread operations
@@ -1834,8 +1768,10 @@ class HAK8s:
         :param num_bkts: Number of buckets to be created and deleted
         :param del_users_dict: Dict of users to be deleted
         :param output: Output queue in which results should be put
+        :keyword header: Obtained header pass for IAM create/delete REST requests
         :return: Queue containing output lists
         """
+        header = kwargs.get("header", False)
         exp_fail = list()
         failed = list()
         created_users = list()
@@ -1848,7 +1784,10 @@ class HAK8s:
                 try:
                     LOGGER.debug("Creating %s user", i_i)
                     user = None
-                    user = self.mgnt_ops.create_account_users(nusers=1)
+                    if not header:
+                        user = self.mgnt_ops.create_account_users(nusers=1)
+                    else:
+                        user = self.create_iam_user_with_header(header=header)
                     if user is None:
                         if event.is_set():
                             exp_fail.append(user)
@@ -1856,7 +1795,8 @@ class HAK8s:
                             failed.append(user)
                     else:
                         created_users.append(user)
-                except CTException as error:
+                except (CTException, req_exception.ConnectionError, req_exception.ConnectTimeout) \
+                        as error:
                     LOGGER.exception("Error: %s", error)
                     if event.is_set():
                         exp_fail.append(user)
@@ -1866,7 +1806,11 @@ class HAK8s:
                 if len(del_users) > i_i:
                     LOGGER.debug("Deleting %s user", del_users[i_i])
                     user = del_users[i_i]
-                    resp = self.delete_s3_acc_buckets_objects({user: del_users_dict[user]})
+                    if not header:
+                        resp = self.delete_s3_acc_buckets_objects({user: del_users_dict[user]})
+                    else:
+                        resp = self.delete_iam_user_with_header({user: del_users_dict[user]},
+                                                                header)
                     if not resp[0]:
                         user_del_failed.append(user)
                         if event.is_set():
@@ -1934,3 +1878,124 @@ class HAK8s:
         LOGGER.info("Running command %s", get_cmd)
         resp = system_utils.execute_cmd(get_cmd)
         return resp
+
+    def dnld_obj_verify_chcksm(self, s3_test_obj, bucket, obj, download_path, upload_checksum):
+        """
+        Function to download the object and verify its checksum
+        :param s3_test_obj: Object of the s3 test lib
+        :param bucket: Name of the bucket
+        :param obj: Name of the object
+        :param download_path: Path to which object is to be downloaded
+        :param upload_checksum: Checksum of uploaded object
+        :return: Tuple (bool, string)
+        """
+        LOGGER.info("Download object %s from bucket %s", obj, bucket)
+        resp = s3_test_obj.object_download(bucket, obj, download_path)
+        LOGGER.info("Download object response: %s", resp)
+        if not resp[0]:
+            return resp
+        download_checksum = self.cal_compare_checksum(file_list=[download_path], compare=False)[0]
+        if upload_checksum != download_checksum:
+            LOGGER.info("Failed to match checksums. \nUpload checksum:%s Download checksum: %s",
+                        upload_checksum, download_checksum)
+            return False, download_checksum
+        LOGGER.info("Successfully downloaded the object and verified the checksum")
+        return True, download_checksum
+
+    @staticmethod
+    def form_endpoint_port(pod_obj, pod_list, port_name="rgw-https"):
+        """
+        Function to form endpoints using pod ip and port
+        :param pod_obj: Object of master node
+        :param pod_list: List of pods
+        :param port_name: Name of the port, e.g. https, http, etc
+        :return: dict
+        """
+        pod_ep_dict = dict()
+        ports = pod_obj.get_pod_ports(pod_list, port_name)
+        for pod in pod_list:
+            pod_prefix = "-".join(pod.split("-")[:2])
+            LOGGER.info("Getting internal IPs of %s pods", pod_prefix)
+            pod_ip = pod_obj.get_all_pods_and_ips(pod_prefix)[pod]
+            port = ports[pod]
+            ip_port = f"{pod_ip}:{port}"
+            pod_ep_dict[pod] = ip_port
+
+        return pod_ep_dict
+
+    def create_iam_user_with_header(self, num_users=1, header=None):
+        """
+        Function create IAM user with give header info.
+        :param num_users: Int count for number of IAM user creation
+        :param header: Existing header to use for IAM user creation post request
+        :return: None if IAM user REST req fails or Dict response for IAM user successful creation
+        """
+        user = None
+        payload = dict()
+        endpoint = CSM_REST_CFG["s3_iam_user_endpoint"]
+        for i_d in range(num_users):
+            try:
+                name = f"ha_iam_{i_d}_{time.perf_counter_ns()}"
+                payload.update({"uid": name})
+                payload.update({"display_name": name})
+                LOGGER.info("Creating IAM user request....")
+                resp = self.restapi.rest_call("post", endpoint=endpoint, json_dict=payload,
+                                              headers=header)
+                LOGGER.info("IAM user request successfully sent...")
+                if resp.status_code == HTTPStatus.CREATED:
+                    resp = resp.json()
+                    user = dict()
+                    user.update({resp["keys"][0]["user"]: {
+                        "user_name": resp["keys"][0]["user"],
+                        "password": S3_CFG["CliConfig"]["s3_account"]["password"],
+                        "accesskey": resp["keys"][0]["access_key"],
+                        "secretkey": resp["keys"][0]["secret_key"]}})
+            except (CTException, req_exception.ConnectionError, req_exception.ConnectTimeout) \
+                    as error:
+                LOGGER.exception("Error: %s", error)
+
+        return user
+
+    def delete_iam_user_with_header(self, user, header):
+        """
+        Function delete IAM user with give header info.
+        :param user: IAM user info dict to be deleted
+        :param header: Existing header to use for IAM user delete request
+        :return: Tuple
+        """
+        del_user = list(user.keys())
+        failed_del = list()
+        try:
+            for user_del in del_user:
+                endpoint = CSM_REST_CFG["s3_iam_user_endpoint"] + "/" + user_del
+                LOGGER.info("Sending Delete %s request...", user_del)
+                response = self.restapi.rest_call("delete", endpoint=endpoint, headers=header)
+                if response.status_code != HTTPStatus.OK:
+                    failed_del.append(user)
+                    LOGGER.debug(response)
+        except (req_exception.ConnectionError, req_exception.ConnectTimeout) as error:
+            LOGGER.exception("Error: %s", error)
+            failed_del.append(user)
+        if failed_del:
+            return False, failed_del
+        return True, "User deleted successfully"
+
+    def calculate_multi_value(self, csm_obj, num_nodes):
+        """
+        Function to calculate the value for how many pods can go down in a given cluster.
+        :param csm_obj: Object for csm rest calls
+        :param num_nodes: Number of worker nodes in cluster
+        :return: tuple
+        """
+        LOGGER.info("Calculate the value for number pods that can go down for cluster")
+        LOGGER.debug("Cluster has %s total number of worker nodes", num_nodes)
+        LOGGER.debug("Get the DIX values from the cluster")
+        resp = csm_obj.get_dix_value()
+        if not resp:
+            return False, "Could not retrieve DIX values"
+        LOGGER.info("Replication factor for cluster is: %s", resp[1])
+        quorum_req = (resp[1] / 2) + 1
+        LOGGER.debug("Minimum IO services required for quorum are: %s", int(quorum_req))
+        multi_value = num_nodes - int(quorum_req)
+        LOGGER.info("Maximum number of pods that can go down: %s", multi_value)
+        return True, multi_value

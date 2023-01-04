@@ -21,3 +21,35 @@ test_32547:
   threads: 25
   rampup: 1
   loop: 10
+test_44256:
+  threads: 25
+  rampup: 1
+  loop: 10
+test_44257:
+  threads: 5
+  rampup: 2
+  loop: 10
+test_44782:
+  total_users: 100
+  error_code: 4104
+  message_id: "PermissionDenied"
+  message_index: 2
+test_44790:
+  total_users: 100
+test_44788:
+  users_count : 1
+  buckets_count : 1
+  files_count : 100
+  rampup: 2
+  loop: 10
+test_45719:
+  users_count : 3
+  rampup: 1
+  loop: 1
+  expect_message: "409,Conflict"
+test_45718:
+  users_count : 1
+  rampup: 1
+  loop: 1
+  expect_message: "409,Conflict"
+

@@ -62,3 +62,7 @@ class FaultAlerts(Enum, settings=NoAlias):
     NW_PORT_FAULT = {'alert_type': 'server_fru',
                      'function': 'server_fru_fun',
                      'resolve': 'NW_PORT_FAULT_RESOLVED', 'support': 'VM'}
+
+if __name__ == '__main__':
+    en = FaultAlerts()
+    en.CPU_USAGE_NO_ALERT

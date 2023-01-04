@@ -17,10 +17,8 @@
 # please email opensource@seagate.com or cortx-questions@seagate.com.
 #
 """BMC helper library."""
-
 import logging
-from typing import Any
-
+from typing import Any, NamedTuple
 import commons.errorcodes as err
 from commons import commands
 from commons.exceptions import CTException
@@ -28,6 +26,10 @@ from commons.helpers.host import Host
 from commons.utils import system_utils
 
 LOGGER = logging.getLogger(__name__)
+
+MotrConsulProcStatus = NamedTuple("MotrConsulProcStatus", [
+    ("consul_svc_status", str),
+    ("consul_motr_proc_status", str)])
 
 
 class Bmc(Host):
@@ -63,7 +65,7 @@ class Bmc(Host):
             success, resp = system_utils.run_local_cmd(cmd)
             if not success:
                 raise CTException(
-                      err.CLIENT_CMD_EXECUTION_FAILED, "Could not get BMC power status")
+                    err.CLIENT_CMD_EXECUTION_FAILED, "Could not get BMC power status")
             LOGGER.debug("Output: %s", str(resp))
         except BaseException as error:
             LOGGER.error("*ERROR* An exception occurred in %s: %s",
@@ -201,3 +203,5 @@ class Bmc(Host):
                 Bmc.resolve_bmc_ip_change_fault.__name__,
                 error)
             raise error
+if __name__ == '__main__':
+    test_it_works()

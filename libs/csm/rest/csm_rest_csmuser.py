@@ -27,7 +27,7 @@ from commons.exceptions import CTException
 from commons.utils import config_utils
 from libs.csm.rest.csm_rest_test_lib import RestTestLib
 
-
+# pylint: disable-msg=unexpected-keyword-arg
 # pylint: disable-msg=too-many-public-methods
 class RestCsmUser(RestTestLib):
     """RestCsmUser contains all the Rest API calls for csm user operations"""
@@ -110,7 +110,7 @@ class RestCsmUser(RestTestLib):
     # pylint: disable=too-many-arguments
     @RestTestLib.authenticate_and_login
     def create_csm_user(self, user_type="valid", user_role="manage",
-                        save_new_user=False, user_email=None, user_password=None):
+                        save_new_user=False, user_email=None, user_password=None, user_name=None):
         """
         This function will create new CSM user
         :param user_password: User password
@@ -133,6 +133,8 @@ class RestCsmUser(RestTestLib):
                 data.update({"email":  user_email})
             if user_password:
                 data.update({"password": user_password})
+            if user_name:
+                data.update({"username": user_name})
             user_data = json.dumps(data)
             if user_type == "missing":
                 user_data = const.MISSING_USER_DATA

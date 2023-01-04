@@ -73,7 +73,7 @@ CMD_TOUCH_FILE = "touch {}"
 LSSCSI_CMD = "lsscsi > {}"
 LINUX_STRING_CMD = "sed '/{}/!d' {} > {}"
 LINUX_REPLACE_STRING = "sed -i 's/{}/{}/g' {}"
-LINUX_EXPORT = "export {}={}"
+LINUX_EXPORT = "export $key=$val"
 LINE_COUNT_CMD = "cat {} | wc -l"
 DISCONNECT_OS_DRIVE_CMD = "echo 1 > /sys/block/{}/device/delete"
 CONNECT_OS_DRIVE_CMD = 'echo "- - -" > /sys/class/scsi_host/host{}/scan'
@@ -185,6 +185,7 @@ PCS_RESOURCE_STATUS_CMD = "pcs resource show {}"
 SYSTEM_CTL_RELOAD_CMD = "systemctl reload {}"
 GET_PID_CMD = "systemctl status {}.service | grep PID"
 KILL_CMD = "kill -9 {}"
+SAFE_KILL_CMD = "kill {}"
 PIDOF_CMD = "pidof {}"
 
 # CORTXCLI Commands
@@ -239,6 +240,8 @@ CMD_IFACE_IP = "netstat -ie | grep -B1 \"{}\" | head -n1 | awk '{{print $1}}'"
 CMD_GET_IP_IFACE = "/sbin/ifconfig \"{}\" | awk '/inet / {{print $2}}'"
 CMD_HOSTS = "cat /etc/hosts"
 CMD_GET_NETMASK = "ifconfig | grep \"{}\" | awk '{{print $4}}'"
+CMD_DMESGS = "dmesg > {}"
+CMD_JOURNALCTL = "journalctl > {}"
 # Provisioner commands
 CMD_LSBLK = "lsblk -S | grep disk | wc -l"
 CMD_LSBLK_SIZE = "lsblk -r |grep disk| awk '{print $4}'"
@@ -305,6 +308,12 @@ CMD_PCS_SERV = "pcs status | grep {}"
 CMD_PCS_GET_XML = "pcs status xml"
 CMD_PCS_GREP = "pcs status --full | grep {}"
 CMD_SALT_GET_HOST = 'salt "*" grains.get host'
+CMD_CORTX_VERSION = 'cat /opt/seagate/cortx/RELEASE.INFO | grep VERSION'
+CMD_DECRYPT_CERTIFICATE = "openssl x509 -in " \
+        "/root/deploy-scripts/charts/cortx/ssl-cert/cortx.pem -noout -{}"
+CMD_FETCH_CERTIFICATE_DETAILS = "openssl x509 -in " \
+                                "/root/deploy-scripts/charts/cortx/ssl-cert/cortx.pem " \
+                                "-noout -{} -nameopt lname -nameopt sep_multiline"
 # LDAP commands
 CMD_GET_S3CIPHER_CONST_KEY = "s3cipher generate_key --const_key cortx"
 CMD_DECRYPT_S3CIPHER_CONST_KEY = "s3cipher decrypt --key {} --data {}"
@@ -399,9 +408,13 @@ M0CP = "m0cp -l {} -H {} -P {} -p {} -s {} -c {} -o {} -L {} {}"
 
 M0CP_G = "m0cp -G -l $ep -H $hax_ep -P $fid -p $prof_fid -s $bsize -c $count -o $obj -L" \
          " $layout $file"
-
-M0CP_U = "m0cp -G -l $ep -H $hax_ep -P $fid -p $prof_fid -s $bsize -c $count -o $obj -L" \
-         " $layout -O $off -u $file" 
+M0CP_U_G = "m0cp $chksum -l $ep -H $hax_ep -P $fid -p $prof_fid -s $bsize -c $count -o $obj -L" \
+         " $layout -O $off -u $file"
+M0TRACE = "m0trace -i $trace > $file"
+LIST_M0TRACE = "ls -ltr| grep m0|awk '{print $9}'"
+GREP_DP_BLOCK_FID = "grep -E \"prepare io fops|UTyp\" $file| cut -d , -f2"
+EMAP_LIST = "python3 /root/wrapper_runner.py -list_emap -m $path -parse_size $size >$file"
+FETCH_ID_EMAP = "grep -n {} -e \"{}\"|awk 'END{{print $7}}'"
 
 # m0cp from data unit aligned offset 0
 # m0cp -G -l inet:tcp:cortx-client-headless-svc-ssc-vm-rhev4-2620@21201
@@ -414,6 +427,7 @@ M0CP_U = "m0cp -G -l $ep -H $hax_ep -P $fid -p $prof_fid -s $bsize -c $count -o 
 
 
 M0CAT = "m0cat -l {} -H {} -P {} -p {} -s {} -c {} -o {} -L {} {}"
+M0CAT_G = "m0cat -G {} -l {} -H {} -P {} -p {} -s {} -c {} -o {} -L {} {}"
 M0UNLINK = "m0unlink -l {} -H {} -P {} -p {} -o {} -L {}"
 M0KV = "m0kv -l {} -h {} -f {} -p {} {}"
 DIFF = "diff {} {}"
@@ -506,6 +520,8 @@ K8S_LDAP_CMD = "kubectl exec -it openldap-0 -- /bin/bash -c \"{}\""
 K8S_SVC_CMD = "kubectl get svc"
 K8S_TAINT_NODE = "kubectl taint node {} node-role.kubernetes.io/master=:NoSchedule"
 K8S_REMOVE_TAINT_NODE = "kubectl taint node {} node-role.kubernetes.io/master=:NoSchedule-"
+K8S_TAINT_CTRL = "kubectl taint nodes {} test=true:NoSchedule"
+K8S_UNTAINT_CTRL = "kubectl taint nodes {} test=true:NoSchedule-"
 K8S_CHK_TAINT = "kubectl describe node {} | grep Taints"
 K8S_CP_TO_LOCAL_CMD = "kubectl cp {}:{} {} -c {}"
 K8S_CP_PV_FILE_TO_LOCAL_CMD = "kubectl cp {}:{} {}"
@@ -522,9 +538,12 @@ K8S_GET_SVC_JSON = "kubectl get svc -o json"
 K8S_POD_INTERACTIVE_CMD = "kubectl exec -it {} -c cortx-hax -- {}"
 K8S_DATA_POD_SERVICE_STATUS = "consul kv get -recurse | grep s3 | grep name"
 K8S_CONSUL_UPDATE_CMD = 'kubectl exec -it {} -c {} -- {}'
+K8S_APPLY_YAML_CONFIG = 'kubectl apply -f {}'
+K8S_DEL_YAML_CONFIG = 'kubectl delete -f $path'
 GET_STATS = "consul kv get -recurse stats"
 GET_BYTECOUNT = "consul kv get -recurse bytecount"
-
+GET_REQUEST_USAGE = "consul kv get -recurse csm/config/CSM_SERVICE | grep request_quota"
+GET_MAX_USERS = "consul kv get -recurse csm/config/CSM_USERS"
 # Kubectl command prefix
 KUBECTL_CMD = "kubectl {} {} -n {} {}"
 KUBECTL_GET_DEPLOYMENT = "kubectl get deployment"
@@ -539,6 +558,7 @@ KUBECTL_DEL_DEPLOY = "kubectl delete deployment {}"
 KUBECTL_DEPLOY_BACKUP = "kubectl get deployment {} -o yaml > {}"
 KUBECTL_RECOVER_DEPLOY = "kubectl create -f {}"
 KUBECTL_GET_POD_HOSTNAME = "kubectl exec -it {} -c cortx-hax -- hostname"
+KUBECTL_GET_POD_FQDN = "kubectl exec -it {} -c cortx-hax -- hostname --all-fqdns"
 KUBECTL_GET_RECENT_POD = "kubectl get pods --sort-by=.metadata.creationTimestamp -o " \
                          "jsonpath='{{.items[-1:].metadata.name}}'"
 KUBECTL_GET_POD_DEPLOY = "kubectl get pods -l app={} -o custom-columns=:metadata.name"
@@ -561,6 +581,10 @@ K8S_CHANGE_POD_NODE = "kubectl patch deploy/{} --type='json' "\
 KUBECTL_CREATE_NAMESPACE = "kubectl create ns {}"
 KUBECTL_GET_NAMESPACE = "kubectl get ns"
 KUBECTL_DEL_NAMESPACE = "kubectl delete ns {}"
+KUBECTL_DESCRIBE_POD_CMD = "kubectl describe pod {}"
+KUBECTL_GET_STATEFULSET = "kubectl get sts | grep '{}'"
+KUBECTL_CREATE_STATEFULSET_REPLICA = "kubectl scale statefulset {} --replicas {}"
+KUBECTL_GET_POD_PORTS = "kubectl get pods {} -o jsonpath='{{.spec.containers[*].ports}}'"
 
 # Fetch logs of a pod/service in a namespace.
 FETCH_LOGS = ""
@@ -576,7 +600,7 @@ HELM_GET_VALUES = "helm get values {}"
 CLSTR_START_CMD = "cd {}; ./start-cortx-cloud.sh"
 CLSTR_STOP_CMD = "cd {}; ./shutdown-cortx-cloud.sh"
 CLSTR_STATUS_CMD = "cd {}; ./status-cortx-cloud.sh"
-CLSTR_LOGS_CMD = "cd {}; ./logs-cortx-cloud.sh"
+CLSTR_LOGS_CMD = "cd {}; ./logs-cortx-cloud.sh -s solution.yaml --all True"
 PRE_REQ_CMD = "cd $dir; ./prereq-deploy-cortx-cloud.sh -p -d $disk"
 DEPLOY_CLUSTER_CMD = "cd $path; ./deploy-cortx-cloud.sh > $log"
 DESTROY_CLUSTER_CMD = "cd $dir; ./destroy-cortx-cloud.sh --force"
@@ -627,7 +651,7 @@ FIELD_CLUSTER_CFG_COMP = "cluster config component --type {}"
 
 # LC Support Bundle
 SUPPORT_BUNDLE_LC = "/opt/seagate/cortx/utils/bin/cortx_support_bundle generate " \
-                    "-c yaml:///etc/cortx/cluster.conf -t {} -b {} -m \"{}\""
+                    "-c consul://cortx-consul-server:8500/conf -t {} -b {} -m \"{}\""
 SUPPORT_BUNDLE_STATUS_LC = "/opt/seagate/cortx/utils/bin/cortx_support_bundle get_status -b {}"
 
 # SNS repair
@@ -639,3 +663,8 @@ CHANGE_DISK_STATE_USING_HCTL = "hctl drive-state --json $(jq --null-input --comp
 # Procpath Collection
 PROC_CMD = "pid=$(echo $(pgrep m0d; pgrep radosgw; pgrep hax) | sed -z 's/ /,/g'); procpath " \
            "record -i 45 -d {} -p $pid"
+
+# stat collection through kubectl top
+CMD_PGREP_TOP = 'pgrep "/bin/sh ./{} {}" -fx'
+
+GET_PID_INIT_PROCESS = "ps -aux | grep {} | head -n 1 | awk '{{print $2}}'"

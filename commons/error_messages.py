@@ -38,9 +38,8 @@ RGW_ERR_DUPLICATE_BKT_NAME = ("An error occurred (BucketAlreadyExists) when call
 CORTX_ERR_DUPLICATE_BKT_NAME = ("An error occurred (BucketAlreadyOwnedByYou) when calling"
                                 "the CreateBucket operation: Your previous request to create "
                                 "the named bucket succeeded and you already own it.")
-RGW_ERR_COPY_OBJ = ("An error occurred (InvalidRequest) when calling the CopyObject operation:"
-                    " The specified copy source is larger than the maximum allowable size for a "
-                    "copy source: 5368709120")
+RGW_ERR_COPY_OBJ = ("An error occurred (EntityTooLarge) when calling the CopyObject "
+                    "operation: Unknown")
 CORTX_ERR_COPY_OBJ = ("An error occurred (InvalidRequest) when calling the CopyObject operation:"
                       " The specified copy source is larger than the maximum allowable size for a "
                       "copy source: 5368709120")
@@ -52,11 +51,14 @@ CORTX_ERR_COPY_OBJ_METADATA = ("An error occurred (InvalidRequest) when calling 
                                "operation: This copy request is illegal because it is trying to "
                                "copy an object to itself without changing the object's metadata, "
                                "storage class, website redirect location or encryption attributes.")
+RGW_ERR_CPY_IF_COND_FALSE  = ("An error occurred (PreconditionFailed) when calling the "
+                               "CopyObject operation: At least one of the pre-conditions you "
+                               "specified did not hold")
 RGW_HEAD_OBJ_ERR = "An error occurred (404) when calling the HeadObject operation: Not Found"
 CORTX_HEAD_OBJ_ERR = "An error occurred (404) when calling the HeadObject operation: Not Found"
 CORTX_INVALD_BYTERANGE = ("An error occurred (InvalidRange) when calling the GetObject operation: "
-                           "The requested range is not satisfiable")
-RGW_INVALD_BYTERANGE =("An error occurred (InvalidRange) when calling the GetObject operation: "
+                          "The requested range is not satisfiable")
+RGW_INVALD_BYTERANGE = ("An error occurred (InvalidRange) when calling the GetObject operation: "
                        "Unknown")
 RGW_MULTI_DELETE_ERR = ("An error occurred (400) when calling the DeleteObjects operation: "
                         "Bad Request")
@@ -78,6 +80,7 @@ NO_SUCH_ENTITY_ERR = "NoSuchEntity"
 NOT_FOUND_ERR = "Not Found"
 MALFORMED_XML_ERR = "MalformedXML"
 INVALID_ARG_ERR = "InvalidArgument"
+INVALID_REQ_ERR = "InvalidRequest"
 
 # S3 Bucket Tagging
 S3_BKT_SET_TAG_ERR = "NoSuchTagSetError"
@@ -111,3 +114,6 @@ S3_BKT_POLICY_NO_SUCH_ERR = "NoSuchBucketPolicy"
 
 # S3 versioning head obj error
 S3_VERSION_NOT_FOUND_GET_OBJ = "The specified version does not exist"
+
+# S3 copy-object
+S3_COPY_OBJECT_QUOTA_ERR = "QuotaExceeded"

@@ -30,6 +30,8 @@ from commons.utils import config_utils
 from libs.csm.rest.csm_rest_test_lib import RestTestLib
 from config import CMN_CFG
 
+# pylint: disable-msg=unexpected-keyword-arg
+
 class SystemHealth(RestTestLib):
     """RestCsmUser contains all the Rest API calls for system health related
     operations"""
@@ -39,8 +41,6 @@ class SystemHealth(RestTestLib):
         Initialize the rest api
         """
         super(SystemHealth, self).__init__()
-        self.main_conf = config_utils.read_yaml(
-            "config\\common_config.yaml")[1]
 
     @RestTestLib.authenticate_and_login
     def get_health_summary(self):
@@ -644,7 +644,7 @@ class SystemHealth(RestTestLib):
         headers = self.headers
         conf_headers = self.config["Login_headers"]
         headers.update(conf_headers)
-        self.log.info("POST REST API Endpoint :", endpoint)
+        self.log.info("POST REST API Endpoint : %s", endpoint)
         # Fetching api response
         response = self.restapi.rest_call("post", endpoint=endpoint, data=json.dumps(req_body),
                                           headers=headers)

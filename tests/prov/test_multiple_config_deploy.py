@@ -36,6 +36,7 @@ from config import  PROV_CFG
 from config import  DEPLOY_CFG
 from libs.prov.prov_k8s_cortx_deploy import ProvDeployK8sCortxLib
 
+LOGGER = logging.getLogger(__name__)
 
 class TestMultipleConfDeploy:
     """Test Multiple config of N+K+S deployment testsuite"""
@@ -61,21 +62,24 @@ class TestMultipleConfDeploy:
             else:
                 cls.worker_node_list.append(node_obj)
         cls.collect_sb = True
+        cls.destroy_flag = False
 
     def teardown_method(self):
         """
         Teardown method
         """
+        path = os.path.join(LOG_DIR, LATEST_LOG_FOLDER)
         if self.collect_sb:
-            path = os.path.join(LOG_DIR, LATEST_LOG_FOLDER)
             support_bundle_utils.collect_support_bundle_k8s(local_dir_path=path,
                                                             scripts_path=
                                                             self.deploy_conf['k8s_dir'])
-        resp = self.deploy_obj.destroy_setup(self.master_node_list[0],
-                                             self.worker_node_list)
-        assert_utils.assert_true(resp)
+        if self.destroy_flag:
+            resp = self.deploy_obj.destroy_setup(self.master_node_list[0],
+                                                 self.worker_node_list)
+            assert_utils.assert_true(resp)
+        self.deploy_obj.close_connections(self.master_node_list, self.worker_node_list)
 
-    def multiple_node_deployment(self, node, config):
+    def multiple_node_deployment(self, node, config, **kwargs):
         """
         This Method is used for deployment of various node count
         and its multiple SNS,DIX configs
@@ -83,6 +87,7 @@ class TestMultipleConfDeploy:
         :param: config: Its the config for each node defined
                         in deploy_config.yaml file
         """
+        log_device = kwargs.get("log_device_flag", False)
         config = DEPLOY_CFG[f'nodes_{node}'][f'config_{config}']
         self.log.info("Running %s N with config %s+%s+%s",
                       node, config['sns_data'], config['sns_parity'], config['sns_spare'])
@@ -91,8 +96,10 @@ class TestMultipleConfDeploy:
             sns_spare=config['sns_spare'], dix_data=config['dix_data'],
             dix_parity=config['dix_parity'], dix_spare=config['dix_spare'],
             cvg_count=config['cvg_per_node'], data_disk_per_cvg=config['data_disk_per_cvg'],
-            master_node_list=self.master_node_list, worker_node_list=self.worker_node_list)
+            master_node_list=self.master_node_list, worker_node_list=self.worker_node_list,
+            s3_instance=1, log_disk_flag=log_device)
         self.collect_sb = False
+        self.destroy_flag = True
 
     @pytest.mark.lc
     @pytest.mark.three_node_deployment
@@ -143,6 +150,16 @@ class TestMultipleConfDeploy:
         Deployment- 3node config_5
         """
         self.multiple_node_deployment(3, 5)
+
+    @pytest.mark.lc
+    @pytest.mark.three_node_deployment
+    @pytest.mark.cluster_deployment
+    @pytest.mark.tags("TEST-45451")
+    def test_45451(self):
+        """
+        Deployment- 3node config_6
+        """
+        self.multiple_node_deployment(3, 6, log_device_flag=True)
 
     @pytest.mark.lc
     @pytest.mark.four_node_deployment
@@ -263,6 +280,36 @@ class TestMultipleConfDeploy:
         Deployment- 5node config_6
         """
         self.multiple_node_deployment(5, 6)
+
+    @pytest.mark.lc
+    @pytest.mark.five_node_deployment
+    @pytest.mark.cluster_deployment
+    @pytest.mark.tags("TEST-45450")
+    def test_45450(self):
+        """
+        Deployment- 5node config_7
+        """
+        self.multiple_node_deployment(5, 7)
+
+    @pytest.mark.lc
+    @pytest.mark.five_node_deployment
+    @pytest.mark.cluster_deployment
+    @pytest.mark.tags("TEST-45452")
+    def test_45452(self):
+        """
+        Deployment- 5node config_8
+        """
+        self.multiple_node_deployment(5, 8, log_device_flag=True)
+
+    @pytest.mark.lc
+    @pytest.mark.five_node_deployment
+    @pytest.mark.cluster_deployment
+    @pytest.mark.tags("TEST-45453")
+    def test_45453(self):
+        """
+        Deployment- 5node config_9
+        """
+        self.multiple_node_deployment(5, 9, log_device_flag=True)
 
     @pytest.mark.lc
     @pytest.mark.six_node_deployment

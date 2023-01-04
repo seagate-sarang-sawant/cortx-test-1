@@ -49,6 +49,7 @@ S3_ENGINE_RGW = 2
 POD_NAME_PREFIX = "cortx-data"
 CORTX_DATA_NODE_PREFIX = "cortx-data-headless-svc-"
 SERVER_POD_NAME_PREFIX = "cortx-server"
+CORTX_CLIENT_SVC_POSTFIX = "cortx-client-headless.cortx.svc.cluster.local"
 HA_POD_NAME_PREFIX = "cortx-ha"
 HA_K8S_CONTAINER_NAME = "cortx-ha-k8s-monitor"
 HA_FAULT_TOLERANCE_CONTAINER_NAME = "cortx-ha-fault-tolerance"
@@ -62,6 +63,7 @@ CLIENT_POD_NAME_PREFIX = "cortx-client"
 MOTR_CONTAINER_PREFIX = "cortx-motr-io"
 HA_SHUTDOWN_SIGNAL_PATH = "scripts/server_scripts/ha_shutdown_signal.py"
 MOCK_MONITOR_REMOTE_PATH = "/root/mock_health_event_publisher.py"
+MOTR_DI_ERR_INJ_SCRIPT_PATH = "/root/error_injection.py"
 MOCK_MONITOR_LOCAL_PATH = "scripts/server_scripts/mock_health_event_publisher.py"
 HA_CONSUL_VERIFY = "cortx>ha>v1>cluster_stop_key:1"
 HA_CONSUL_NOKEY = "NotFound"
@@ -73,6 +75,12 @@ MOTR_CLIENT="motr_client"
 UPGRADE_IN_PROGRESS_MSG = "An upgrade is already in progress"
 UPGRADE_SUSPEND_MSG = "Upgrade suspended"
 UPGRADE_ALREADY_SUSPENDED = "Upgrade Process Not found on the system, Suspend cannot be performed"
+PARSE_SIZE = "10485760"
+CONTAINER_PATH = "/root/error_injection.py"
+PARSER_PATH = "/root/metadata_parser.py"
+WRAPPER_PATH = "/root/wrapper_runner.py"
+POD_HCTL_POSTFIX = "-headless.cortx.svc.cluster.local"
+CONTROL_POD_SVC_NAME = "csm_agent"
 
 # common constant.
 ERR_MSG = "Error in %s: %s"
@@ -151,13 +159,17 @@ CONF_SYSFS_BASE_PATH = "SYSTEM_INFORMATION>sysfs_base_path"
 CONF_RAID_INTEGRITY = "RAIDINTEGRITYSENSOR>retry_interval"
 AUTHSERVER_CONFIG = "/opt/seagate/cortx/auth/resources/authserver.properties"
 LOCAL_COPY_PATH = tempfile.gettempdir() + "/authserver.properties"
+CLUSTER_YAML = "cluster.yaml"
 LOCAL_CONF_PATH = tempfile.gettempdir() + "/cluster.conf"
+LOCAL_CLS_YAML_PATH = tempfile.gettempdir() + "/" + CLUSTER_YAML
 LOCAL_SOLUTION_PATH = tempfile.gettempdir() + "/solution.yaml"
 CLUSTER_CONF_PATH = "/etc/cortx/cluster.conf"
+CLUSTER_YAML_PATH = "/etc/cortx/solution/cluster.yaml"
 CSM_CONF_PATH = "/etc/cortx/csm/csm.conf"
 CSM_COPY_PATH = tempfile.gettempdir() + "/csm.conf"
 CLUSTER_COPY_PATH = tempfile.gettempdir() + "/cluster.conf"
 CORTX_CSM_POD = "cortx-csm-agent"
+CSM_AGENT_PRC = "python3 /opt/seagate/cortx/csm/bin/csm_agent"
 LOCAL_PEM_PATH = "/etc/ssl/stx/stx.pem"
 SUPPORT_BUNDLE_DIR_PATH = tempfile.gettempdir() + "/csm_support_bundle/"
 NODE_INDEX = 2
@@ -203,9 +215,7 @@ class Rest:
     S3_ACCOUNTS = "s3_accounts"
     ACC_NAME = "account_name"
     ACC_EMAIL = "account_email"
-    SECRET_KEY = "secret_key"
     IAMUSERS = "iam_users"
-    ACCESS_KEY = "access_key"
     USER_NAME = "user_name"
     USER_ID = "user_id"
     IAM_USER = "test_iam_user"
@@ -286,6 +296,7 @@ class Rest:
                          "iops_write_object",
                          "iops_read_bucket",
                          "iops_write_bucket"]
+    CAPACITY_UPDATE_TIMEOUT = 600
 
 
 # aws cli errors
@@ -374,7 +385,7 @@ CSM_USER_HELP = [
 
 # Prov Constants:
 JENKINS_USERNAME = "6LS9f5yJ1IFpxbasg/wPKG4p5ycaBT6x/j7Kj7anTSk="
-JENKINS_PASSWORD = "/AxML7GgiVqRSmKGcPSJSorUq0X9FLZrfrlEyw6tjKnccwT67II+SwOcKBWPV6SWoBwM/46rAky+fXKumyX41Q=="
+JENKINS_PWD = "/AxML7GgiVqRSmKGcPSJSorUq0X9FLZrfrlEyw6tjKnccwT67II+SwOcKBWPV6SWoBwM/46rAky+fXKumyX41Q=="
 TOKEN_NAME = "10Mnx/XE4tEN8xrzQTNp2iSGQxPjpcHXbIdZgJyIN7Y="
 PARAMS = {"CORTX_BUILD": "{0}", "HOST": "{1}", "HOST_PASS": "{2}", "DEBUG": "True"}
 PIP_CONFIG = "/etc/pip.conf"
@@ -453,6 +464,7 @@ SB_POD_PREFIX_AND_COMPONENT_LIST = {POD_NAME_PREFIX: ["hare", "motr", "utils"],
                                     CONTROL_POD_NAME_PREFIX: ["csm", "utils"],
                                     HA_POD_NAME_PREFIX: ["utils"]}
 SB_EXTRACTED_PATH = "/etc/cortx/log/"
+SB_SIZE_MB = 500
 
 # K8s env
 K8S_SCRIPTS_PATH = "/root/deploy-scripts/k8_cortx_cloud/"
@@ -492,3 +504,11 @@ REQUIRED_MODULES = ["Procpath", "apsw-wheels"]
 DTM_RECOVERY_STATE = "RECOVERED"
 M0D_SVC = "ioservice"
 SERVER_SVC = "rgw_s3"
+STATEFULSET = "StatefulSet"
+REPLICASET = "ReplicaSet"
+
+# stat collection through kubectl top
+PROFILE_FILE_PATH = "scripts/io_stability/profiling.yaml"
+COLLECTION_SCRIPT_PATH = "scripts/io_stability/collect-k8s-stats.sh"
+PROFILE_FILE = "profiling.yaml"
+COLLECTION_FILE = "collect-k8s-stats.sh"

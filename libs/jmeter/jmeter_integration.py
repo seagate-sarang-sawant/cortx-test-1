@@ -43,6 +43,7 @@ class JmeterInt():
         self.jmx_path = JMETER_CFG["jmx_path"]
         self.jtl_log_path = JMETER_CFG["jtl_log_path"]
         self.test_data_csv = JMETER_CFG["test_data_csv"]
+        self.log_file_path = ""
 
     def append_log(self, log_file: str):
         """Append and verify log to the log file.
@@ -54,10 +55,9 @@ class JmeterInt():
         self.log.debug(content)
 
     def run_jmx(self, jmx_file: str, threads:int=25, rampup:int=1, loop:int=1, test_cfg:str=None):
-        """Set the user properties and run the jmx file and verify the logs
-
+        """Set the user properties and run the jmx file
         :param jmx_file: jmx file located in the JMX_PATH
-        :return [tuple]: boolean, Error message
+        :return [tuple]: response of command
         """
         if test_cfg is None:
             test_cfg = os.path.join(self.jmeter_path, self.test_data_csv)
@@ -79,20 +79,67 @@ class JmeterInt():
         jmx_file_path = os.path.join(self.jmx_path, jmx_file)
         self.log.info("JMX file : %s", jmx_file_path)
         log_file = jmx_file.split(".")[0] + ".jtl"
-        log_file_path = os.path.join(self.jtl_log_path, log_file)
-        self.log.info("Log file name : %s ", log_file_path)
-        cmd = JMX_CMD.format(self.jmeter_path, jmx_file_path, log_file_path, self.jtl_log_path)
+        self.log_file_path = os.path.join(self.jtl_log_path, log_file)
+        self.log.info("Log file name : %s ", self.log_file_path)
+        cmd = JMX_CMD.format(self.jmeter_path, jmx_file_path, self.log_file_path, self.jtl_log_path)
         self.log.info("Executing JMeter command : %s", cmd)
         result, resp = system_utils.run_local_cmd(cmd, chk_stderr=True)
-        self.log.info("Verify if any errors are reported...")
         if result:
             self.log.info("Jmeter execution completed.")
-            result = re.match(r"Err:\s*0\s*.*", resp) is not None
         else:
             assert result, "Failed to execute command."
-        self.log.info("No Errors are reported in the Jmeter execution.")
-        self.append_log(log_file_path)
+        self.append_log(self.log_file_path)
         return resp
+
+    # pylint: disable=too-many-arguments
+    def run_verify_jmx(
+        self,
+        jmx_file: str,
+        threads:int=25,
+        rampup:int=1,
+        loop:int=1,
+        test_cfg:str=None
+        ):
+        """Set the user properties and run the jmx file and verify the logs
+        :param jmx_file: jmx file located in the JMX_PATH
+        :return [bool]: True if error count is expected in jmx result log
+        """
+        resp = self.run_jmx(jmx_file, threads, rampup, loop, test_cfg)
+        resp = resp.replace("\\n","\n")
+        summary_txt = re.findall(r"summary =\s*.*",resp)[-1]
+        err_list = re.findall(r"Err:[^(]*", summary_txt)[-1]
+        error_count = re.findall(r'\d+', err_list)[-1]
+        result = (int(error_count) == 0)
+        if result is False:
+            self.log.info("error_counts : %s", error_count)
+        return result
+
+    # pylint: disable=too-many-arguments
+    def run_verify_jmx_with_message(
+        self,
+        jmx_file: str,
+        expect_count = 0,
+        expect_message = "",
+        threads:int=25,
+        rampup:int=1,
+        loop:int=1,
+        test_cfg:str=None
+        ):
+        """Set the user properties and run the jmx file and verify the logs
+        :param jmx_file: jmx file located in the JMX_PATH
+        :return [bool]: True if error count is expected in jmx result log
+        """
+        self.run_jmx(jmx_file, threads, rampup, loop, test_cfg)
+        result = False
+        if os.path.exists(self.log_file_path):
+            file = open(self.log_file_path, "r")
+            message_count = file.read().count(expect_message)
+            result = (message_count == expect_count)
+            self.log.info("self.log_file_path : %s", self.log_file_path)
+            if result is False:
+                self.log.info("error_counts : %s", message_count)
+                self.log.info("expect_error_count : %s", expect_count)
+        return result
 
     def update_user_properties(self, content: dict):
         """Update the user.properties file in the JMX_PATH/bin
